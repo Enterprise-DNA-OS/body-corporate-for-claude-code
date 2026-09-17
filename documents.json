@@ -1,11 +1,112 @@
 [
   {
-    "name": "example",
-    "title": "TODO(author): the first document this industry must produce",
-    "for_each": "select gen_random_uuid() as id, 'Example' as name",
+    "name": "levy-notice",
+    "title": "Levy notice",
+    "for_each": "select l.id, (l.ref || ' ' || s.name) as name from lots l join schemes s on s.id = l.scheme_id where l.status = 'active' and exists (select 1 from levy_charges c join levy_runs r on r.id = c.levy_run_id where c.lot_id = l.id and r.due_on >= current_date - 30) order by l.ref",
     "file": "name",
     "sections": [
-      { "title": "Details", "sql": "select 'replace me' as item, $1::text as record_id" }
+      {
+        "title": "The lot",
+        "sql": "select s.name as body_corporate, coalesce(s.plan_number, '') as plan, coalesce(s.address_line, '') || case when s.suburb is null then '' else ', ' || s.suburb end as address, coalesce(l.unit_label, 'Lot ' || l.lot_number) as unit, l.lot_number, p.owners as owner, coalesce(p.owner_email, '') as email, l.utility_interest, to_char(current_date, 'DD Month YYYY') as prepared_on, l.ref as payment_reference from lots l join schemes s on s.id = l.scheme_id join v_lot_position p on p.lot_id = l.id where l.id = $1"
+      },
+      {
+        "title": "Levies falling due",
+        "note": "Struck by resolution of the body corporate and split by utility interest. Pay to the body corporate's bank account with the payment reference above.",
+        "sql": "select r.name as levy, r.fund, to_char(r.struck_on, 'DD Mon YYYY') as struck, to_char(r.due_on, 'DD Mon YYYY') as due, to_char(c.amount_cents / 100.0, 'FM$999,999,990.00') as amount from levy_charges c join levy_runs r on r.id = c.levy_run_id where c.lot_id = $1 and r.due_on >= current_date - 30 order by r.due_on"
+      },
+      {
+        "title": "The account position",
+        "sql": "select to_char(p.charged_due_cents / 100.0, 'FM$999,999,990.00') as levies_fallen_due, to_char(p.paid_cents / 100.0, 'FM$999,999,990.00') as received, to_char(greatest(0, p.charged_due_cents - p.paid_cents) / 100.0, 'FM$999,999,990.00') as balance_owing, coalesce(to_char(p.last_payment_on, 'DD Mon YYYY'), 'no payment on record') as last_payment from v_lot_position p where p.lot_id = $1"
+      }
+    ]
+  },
+  {
+    "name": "arrears-letter-draft",
+    "title": "Levy arrears letter (draft)",
+    "for_each": "select a.lot_id as id, (a.lot_ref || ' ' || a.scheme) as name from v_arrears a order by a.days_behind desc",
+    "file": "name",
+    "sections": [
+      {
+        "title": "This is a draft. Nobody has been sent anything.",
+        "note": "Read it, change it, and send it yourself. Keep proof of service: if this ends with a debt collector or an adjudicator, the file is the case.",
+        "sql": "select a.scheme as body_corporate, a.lot_ref as lot, a.owners as addressed_to, coalesce(a.owner_email, '') as email, to_char(current_date, 'DD Month YYYY') as dated, a.manager as from_whom from v_arrears a where a.lot_id = $1"
+      },
+      {
+        "title": "What is owed",
+        "sql": "select to_char(a.arrears_cents / 100.0, 'FM$999,999,990.00') as amount_owing, a.days_behind || ' days' as how_far_behind, to_char(a.arrears_since, 'DD Mon YYYY') as unpaid_since, coalesce(to_char(a.last_payment_on, 'DD Mon YYYY'), 'no payment recorded') as last_payment_received from v_arrears a where a.lot_id = $1"
+      },
+      {
+        "title": "The levies behind the balance",
+        "sql": "select r.name as levy, r.fund, to_char(r.due_on, 'DD Mon YYYY') as fell_due, to_char(c.amount_cents / 100.0, 'FM$999,999,990.00') as amount from levy_charges c join levy_runs r on r.id = c.levy_run_id where c.lot_id = $1 and r.due_on <= current_date order by r.due_on"
+      },
+      {
+        "title": "What has already been sent",
+        "sql": "select to_char(ae.noted_on, 'DD Mon YYYY') as date, ae.action as step, to_char(ae.amount_cents / 100.0, 'FM$999,999,990.00') as amount_at_the_time, coalesce(ae.note, '') as note from arrears_events ae where ae.lot_id = $1 order by ae.noted_on"
+      },
+      {
+        "title": "The next rung of the ladder",
+        "note": "The ladder is the body corporate's own: reminder at thirty days, formal demand at sixty, recovery at ninety. A levy is recoverable as a debt under the Unit Titles Act 2010, and interest, if charged, is capped at ten percent a year (Unit Titles Regulations 2011).",
+        "sql": "select case when a.days_behind >= 90 and a.recovery_started_on is null then 'Start debt recovery' when a.days_behind >= 60 and a.last_demand_on is null then 'Issue the formal demand' when a.days_behind >= 30 and a.last_reminder_on is null then 'Send the reminder' else 'Ring them' end as next_step, coalesce(to_char(a.last_reminder_on, 'DD Mon YYYY'), 'none sent') as reminder, coalesce(to_char(a.last_demand_on, 'DD Mon YYYY'), 'none sent') as formal_demand, coalesce(to_char(a.recovery_started_on, 'DD Mon YYYY'), 'not started') as recovery, coalesce(to_char(a.payment_plan_on, 'DD Mon YYYY'), 'none') as payment_plan from v_arrears a where a.lot_id = $1"
+      }
+    ]
+  },
+  {
+    "name": "meeting-notice",
+    "title": "Notice of general meeting",
+    "for_each": "select mt.id, (s.code || ' ' || mt.kind || ' ' || to_char(mt.scheduled_on, 'YYYY-MM-DD')) as name from meetings mt join schemes s on s.id = mt.scheme_id where mt.held_on is null and mt.scheduled_on >= current_date order by mt.scheduled_on",
+    "file": "name",
+    "sections": [
+      {
+        "title": "The meeting",
+        "sql": "select s.name as body_corporate, coalesce(s.plan_number, '') as plan, mt.kind as meeting, to_char(mt.scheduled_on, 'DD Month YYYY') as to_be_held_on, coalesce(mt.venue, 'venue to be confirmed') as venue, coalesce(to_char(mt.notice_sent_on, 'DD Month YYYY'), 'NOT YET SENT') as notice_sent, case when mt.notice_sent_on is null then 'Written notice must reach every owner at least fourteen days before the meeting.' else (mt.scheduled_on - mt.notice_sent_on) || ' days of notice' || case when (mt.scheduled_on - mt.notice_sent_on) < 14 then ' - SHORT of the fourteen days' else '' end end as notice_position from meetings mt join schemes s on s.id = mt.scheme_id where mt.id = $1"
+      },
+      {
+        "title": "Agenda",
+        "note": "An ordinary resolution passes on a simple majority of votes cast. A special resolution needs seventy five percent.",
+        "sql": "select mo.number as item, mo.title as motion, mo.kind as resolution, coalesce(mo.detail, '') as detail from motions mo where mo.meeting_id = $1 order by mo.number"
+      },
+      {
+        "title": "The context owners should have",
+        "sql": "select to_char(p.agm_deadline, 'DD Month YYYY') as agm_deadline_this_year, case when p.days_to_deadline < 0 then 'The statutory deadline (six months after the financial year end, Unit Titles Act 2010 s 89) has passed.' else 'The statutory deadline is ' || p.days_to_deadline || ' days away.' end as position from v_agm_position p join meetings mt on mt.scheme_id = p.scheme_id where mt.id = $1"
+      }
+    ]
+  },
+  {
+    "name": "scheme-annual-summary",
+    "title": "Scheme summary",
+    "for_each": "select s.id, s.name from schemes s where s.status = 'managed' order by s.code",
+    "file": "name",
+    "sections": [
+      {
+        "title": "The scheme",
+        "sql": "select s.name as body_corporate, coalesce(s.plan_number, '') as plan, coalesce(s.address_line, '') || case when s.suburb is null then '' else ', ' || s.suburb end as address, ss.lots, ss.manager as body_corporate_manager, coalesce(ss.chairperson, 'none on file') as chairperson, to_char(current_date, 'DD Month YYYY') as prepared_on from schemes s join v_scheme_summary ss on ss.scheme_id = s.id where s.id = $1"
+      },
+      {
+        "title": "Levies in the last twelve months",
+        "note": "These figures report what was struck and what came in. This system records them, it does not move money.",
+        "sql": "select r.name as levy, r.fund, to_char(r.due_on, 'DD Mon YYYY') as due, to_char(r.total_cents / 100.0, 'FM$999,999,990') as struck, (select count(*) from levy_charges c where c.levy_run_id = r.id) as lots from levy_runs r where r.scheme_id = $1 and r.due_on >= current_date - 365 order by r.due_on desc"
+      },
+      {
+        "title": "Arrears",
+        "sql": "select a.lot_ref as lot, a.owners as owner, to_char(a.arrears_cents / 100.0, 'FM$999,999,990.00') as owing, a.days_behind, coalesce(to_char(a.last_reminder_on, 'DD Mon YYYY'), 'none') as reminder, coalesce(to_char(a.last_demand_on, 'DD Mon YYYY'), 'none') as formal_demand from v_arrears a where a.scheme_id = $1 order by a.days_behind desc"
+      },
+      {
+        "title": "The meeting record",
+        "sql": "select mt.kind as meeting, coalesce(to_char(mt.scheduled_on, 'DD Mon YYYY'), '') as booked, coalesce(to_char(mt.held_on, 'DD Mon YYYY'), 'not held') as held, coalesce(to_char(mt.minutes_sent_on, 'DD Mon YYYY'), case when mt.held_on is null then '' else 'MINUTES NOT SENT' end) as minutes, (select count(*) from motions mo where mo.meeting_id = mt.id) as motions from meetings mt where mt.scheme_id = $1 order by coalesce(mt.held_on, mt.scheduled_on) desc"
+      },
+      {
+        "title": "Insurance",
+        "sql": "select ip.kind as policy, coalesce(ip.insurer, '') as insurer, coalesce(ip.policy_number, '') as number, to_char(ip.sum_insured_cents / 100.0, 'FM$999,999,990') as sum_insured, coalesce(to_char(ip.valuation_on, 'DD Mon YYYY'), case when ip.kind = 'principal' then 'NO VALUATION' else '' end) as valuation, case when ip.expires_on < current_date then 'EXPIRED ' || to_char(ip.expires_on, 'DD Mon YYYY') else to_char(ip.expires_on, 'DD Mon YYYY') end as expires from insurance_policies ip where ip.scheme_id = $1 order by ip.kind"
+      },
+      {
+        "title": "Maintenance in the last twelve months",
+        "sql": "select coalesce(mr.job_ref, '') as ref, to_char(mr.reported_on, 'DD Mon YYYY') as reported, mr.summary as what, mr.status, coalesce(ct.name, '') as contractor, case when j.invoiced_cents > 0 then to_char(j.invoiced_cents / 100.0, 'FM$999,999,990.00') else '' end as invoiced from maintenance_requests mr left join contractor_jobs j on j.id = (select j2.id from contractor_jobs j2 where j2.maintenance_id = mr.id order by j2.issued_on desc nulls last limit 1) left join contractors ct on ct.id = j.contractor_id where mr.scheme_id = $1 and mr.reported_on >= current_date - 365 order by mr.reported_on desc"
+      },
+      {
+        "title": "Compliance",
+        "note": "Anything below that is not compliant is work the body corporate has to fund. Each item names the rule it comes from.",
+        "sql": "select ci.kind as item, ci.status, coalesce(to_char(ci.assessed_on, 'DD Mon YYYY'), '') as assessed, coalesce(to_char(ci.due_on, 'DD Mon YYYY'), '') as due, coalesce(ci.note, '') as note, coalesce(ci.standard, '') as the_rule from compliance_items ci where ci.scheme_id = $1 and ci.status <> 'exempt' order by case ci.status when 'not compliant' then 1 when 'unknown' then 2 else 3 end, ci.kind"
+      }
     ]
   }
 ]

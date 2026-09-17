@@ -1,13 +1,65 @@
 [
   {
     "name": "week",
-    "title": "This week",
-    "subtitle": "Body Corporate for Claude Code: what needs attention, rendered by npm run view",
+    "title": "The week",
+    "subtitle": "Body Corporate for Claude Code: who is behind, what is overdue, what is waiting on a committee. Rendered by npm run view.",
     "sections": [
       {
-        "title": "Needs attention",
-        "note": "TODO(author): point this at the industry's attention view (overdue, stuck, quiet).",
-        "sql": "select 'replace me' as item, 'TODO(author)' as why"
+        "title": "Needs a decision",
+        "note": "Arrears past the ladder, insurance holes, AGMs against the s 89 deadline, disclosure clocks, work waiting on committees.",
+        "sql": "select case reason when 'arrears_recovery' then 'Arrears, recovery never started' when 'arrears_demand' then 'Arrears, no formal demand' when 'arrears_reminder' then 'Arrears, no reminder' when 'arrears_watch' then 'Behind, inside the window' when 'insurance_expired' then 'Insurance EXPIRED' when 'agm_overdue' then 'AGM past the deadline' when 'meeting_short_notice' then 'Meeting without proper notice' when 'maintenance_habitability' then 'Habitability work open' when 'disclosure_overdue' then 'Disclosure past five working days' when 'insurance_expiring' then 'Insurance expiring' when 'valuation_stale' then 'Valuation stale' when 'maintenance_committee_waiting' then 'Waiting on a committee' when 'maintenance_no_contractor' then 'Approved, nobody sent' when 'compliance_overdue' then 'Compliance not met' when 'agm_deadline_close' then 'AGM deadline close, nothing booked' when 'minutes_not_sent' then 'Minutes never sent' when 'job_not_invoiced' then 'Job done, no invoice' when 'agreement_expiring' then 'Management agreement expiring' when 'task_overdue' then 'Task overdue' when 'scheme_quiet' then 'Scheme nobody has rung' else reason end as what, label as record, scheme, party as who, days, case when amount_cents > 0 then to_char(amount_cents / 100.0, 'FM$999,999,990') else '' end as value, manager, detail from v_attention_due order by case reason when 'arrears_recovery' then 1 when 'arrears_demand' then 2 when 'arrears_reminder' then 3 when 'arrears_watch' then 4 when 'insurance_expired' then 5 when 'agm_overdue' then 6 when 'meeting_short_notice' then 7 when 'maintenance_habitability' then 8 when 'disclosure_overdue' then 9 when 'insurance_expiring' then 10 when 'valuation_stale' then 11 when 'maintenance_committee_waiting' then 12 when 'maintenance_no_contractor' then 13 when 'compliance_overdue' then 14 when 'agm_deadline_close' then 15 when 'minutes_not_sent' then 16 when 'job_not_invoiced' then 17 when 'agreement_expiring' then 18 when 'task_overdue' then 19 else 20 end, days desc"
+      },
+      {
+        "title": "Levy arrears",
+        "note": "The ladder: reminder at thirty days, formal demand at sixty, recovery at ninety. Interest, if charged, is capped at ten percent a year (Unit Titles Regulations 2011).",
+        "sql": "select lot_ref as lot, scheme, owners, to_char(arrears_cents / 100.0, 'FM$999,999,990') as owing, days_behind as days, coalesce(to_char(last_payment_on, 'YYYY-MM-DD'), 'never') as last_paid, coalesce(to_char(last_reminder_on, 'YYYY-MM-DD'), 'NONE') as reminder, coalesce(to_char(last_demand_on, 'YYYY-MM-DD'), 'NONE') as formal_demand, coalesce(to_char(recovery_started_on, 'YYYY-MM-DD'), 'no') as recovery, manager from v_arrears order by days_behind desc"
+      },
+      {
+        "title": "The AGM season",
+        "note": "An AGM must be held within six months of the end of the financial year (Unit Titles Act 2010 s 89). Notice of a general meeting needs fourteen days.",
+        "sql": "select scheme_code as code, scheme, to_char(last_fy_end_on, 'YYYY-MM-DD') as fy_ended, to_char(agm_deadline, 'YYYY-MM-DD') as agm_by, coalesce(to_char(last_agm_on, 'YYYY-MM-DD'), 'never') as last_agm, case when agm_held_this_year then 'held' when agm_booked then 'booked ' || to_char(next_meeting_on, 'YYYY-MM-DD') when days_to_deadline < 0 then (-days_to_deadline) || ' days OVERDUE' else days_to_deadline || ' days left, nothing booked' end as position, coalesce(next_meeting_kind, '') as next_meeting, case when next_meeting_on is null then '' when notice_sent_on is null then 'NO NOTICE' else notice_days || ' days notice' || case when notice_days < 14 then ' SHORT' else '' end end as notice, manager from v_agm_position order by days_to_deadline"
+      },
+      {
+        "title": "Maintenance open",
+        "note": "Habitability first, then whatever has been sitting on a committee longest.",
+        "sql": "select coalesce(job_ref, '') as ref, scheme, priority, category, summary as what, status, days_open || 'd' as open_for, case when days_waiting_on_committee is null then '' else days_waiting_on_committee || 'd' end as waiting_on_committee, contractor, case when quoted_cents > 0 then to_char(quoted_cents / 100.0, 'FM$999,999,990') else '' end as quoted, manager from v_maintenance_open order by case priority when 'urgent' then 1 when 'high' then 2 when 'normal' then 3 else 4 end, days_open desc"
+      },
+      {
+        "title": "Disclosures open",
+        "note": "A pre-settlement disclosure statement has five working days from the request (Unit Titles Act 2010 s 147).",
+        "sql": "select lot_ref as lot, scheme, owners, kind, to_char(requested_on, 'YYYY-MM-DD') as requested, requested_by, working_days_open || case when working_days_open > 5 then ' LATE' else '' end as working_days, manager from v_disclosures_open order by working_days_open desc"
+      },
+      {
+        "title": "Compliance not met",
+        "sql": "select scheme_code as code, scheme, kind as item, status, coalesce(to_char(assessed_on, 'YYYY-MM-DD'), '') as assessed, coalesce(to_char(due_on, 'YYYY-MM-DD'), '') as due, case when days_overdue > 0 then days_overdue || ' days' else '' end as overdue, note from v_compliance_due where status not in ('compliant', 'exempt') order by days_overdue desc nulls last"
+      }
+    ]
+  },
+  {
+    "name": "portfolio",
+    "title": "The portfolio",
+    "subtitle": "Every scheme, its levies, its insurance and its committee. Rendered by npm run view.",
+    "sections": [
+      {
+        "title": "The schemes",
+        "sql": "select scheme_code as code, scheme, suburb, scheme_type as type, lots, case when arrears_cents > 0 then to_char(arrears_cents / 100.0, 'FM$999,999,990') else '' end as arrears, to_char(agm_deadline, 'YYYY-MM-DD') as agm_by, case when agm_held_this_year then 'held' when agm_booked then 'booked' when days_to_deadline < 0 then 'OVERDUE' else days_to_deadline || 'd left' end as agm, case when insurance_expires_on < current_date then 'EXPIRED ' || to_char(insurance_expires_on, 'YYYY-MM-DD') else to_char(insurance_expires_on, 'YYYY-MM-DD') end as insurance, open_maintenance as jobs, compliance_gaps as gaps, coalesce(chairperson, 'NONE') as chairperson, to_char(base_fee_annual_cents / 100.0, 'FM$999,990') as base_fee, manager from v_scheme_summary order by scheme_code"
+      },
+      {
+        "title": "The insurance programme",
+        "note": "Principal insurance at full replacement value is the Act's requirement (Unit Titles Act 2010 s 135). A valuation over three years old is flagged.",
+        "sql": "select scheme_code as code, scheme, kind as policy, insurer, policy_number as number, to_char(sum_insured_cents / 100.0, 'FM$999,999,990') as sum_insured, case when valuation_on is null and kind = 'principal' then 'NONE' else coalesce(to_char(valuation_on, 'YYYY-MM-DD'), '') || case when valuation_age_days > 1095 then ' STALE' else '' end end as valuation, case when days_to_expiry < 0 then 'EXPIRED ' || to_char(expires_on, 'YYYY-MM-DD') else to_char(expires_on, 'YYYY-MM-DD') end as expires, case when premium_cents > 0 then to_char(premium_cents / 100.0, 'FM$999,999,990') else '' end as premium from v_insurance_position order by days_to_expiry nulls last"
+      },
+      {
+        "title": "Levy runs, last twelve months",
+        "sql": "select s.code, s.name as scheme, r.name as levy, r.fund, to_char(r.struck_on, 'YYYY-MM-DD') as struck, to_char(r.due_on, 'YYYY-MM-DD') as due, to_char(r.total_cents / 100.0, 'FM$999,999,990') as total, (select count(*) from levy_charges c where c.levy_run_id = r.id) as lots, case when r.due_on > current_date then 'not yet due' else 'due' end as position from levy_runs r join schemes s on s.id = r.scheme_id where r.due_on >= current_date - 365 order by s.code, r.due_on desc"
+      },
+      {
+        "title": "Contractors, and what they have been paid",
+        "sql": "select c.name as contractor, c.trade, coalesce(c.contact_name, '') as contact, coalesce(c.phone, '') as phone, coalesce(c.licence_ref, '') as licence, case when c.insurance_expires_on is null then 'not on file' when c.insurance_expires_on < current_date then 'EXPIRED ' || to_char(c.insurance_expires_on, 'DD Mon YYYY') else to_char(c.insurance_expires_on, 'DD Mon YYYY') end as insurance, count(j.id) as jobs_12m, to_char(coalesce(sum(j.invoiced_cents), 0) / 100.0, 'FM$999,999,990') as invoiced_12m from contractors c left join contractor_jobs j on j.contractor_id = c.id and j.issued_on >= current_date - 365 group by c.id, c.name, c.trade, c.contact_name, c.phone, c.licence_ref, c.insurance_expires_on order by sum(j.invoiced_cents) desc nulls last"
+      },
+      {
+        "title": "The committees",
+        "sql": "select s.code, s.name as scheme, cm.role, o.name as member, coalesce(o.email, '') as email, coalesce(o.phone, '') as phone, to_char(cm.since_on, 'YYYY-MM-DD') as since from committee_members cm join schemes s on s.id = cm.scheme_id join owners o on o.id = cm.owner_id where cm.until_on is null order by s.code, case cm.role when 'chairperson' then 1 else 2 end, o.name"
       }
     ]
   }
